@@ -323,6 +323,9 @@ async def send_daily_recap(context: ContextTypes.DEFAULT_TYPE):
                     WHERE dm.date = ? AND t.channel_id = ?
                 ''', (current_date, channel['channel_id'])).fetchall()
 
+            if len(tasks) == 0:
+                continue
+
             # Group tasks by user
             user_tasks = defaultdict(lambda: {'completed': [], 'failed': [], 'pending': []})
             for task in tasks:
