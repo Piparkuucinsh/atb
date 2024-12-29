@@ -55,7 +55,7 @@ def init_db():
                 user_id INTEGER NOT NULL,
                 date DATETIME NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(channel_id, date)
+                UNIQUE(channel_id, date, user_id)
             );
             
             CREATE TABLE IF NOT EXISTS tasks (
@@ -137,6 +137,7 @@ async def start_daily_routine(context: ContextTypes.DEFAULT_TYPE):
                 chat_members = await context.bot.get_chat_administrators(
                     channel["channel_id"]
                 )
+                    
 
                 for member in chat_members:
                     if member.user.is_bot:
