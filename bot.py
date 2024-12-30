@@ -450,10 +450,6 @@ async def setup_commands(context: ContextTypes.DEFAULT_TYPE):
     """Set up bot commands in Telegram"""
     commands = [
         ("start", "Start the accountability bot in this channel"),
-        (
-            "timezone",
-            "Set the timezone for this channel (e.g., /timezone Europe/London)",
-        ),
         ("task", "Add a task to your daily message"),
     ]
 
