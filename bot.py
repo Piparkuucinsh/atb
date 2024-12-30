@@ -383,7 +383,7 @@ async def send_daily_recap(context: ContextTypes.DEFAULT_TYPE):
                     )
                     SELECT t.*, dm.date
                     FROM tasks t
-                    JOIN daily_messages dm ON t.channel_id = dm.channel_id
+                    JOIN daily_messages dm ON t.channel_id = dm.channel_id and t.user_id = dm.user_id
                     JOIN latest_message lm ON dm.date = lm.date
                     WHERE t.channel_id = ?
                 """,
