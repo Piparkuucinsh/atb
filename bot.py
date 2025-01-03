@@ -65,6 +65,7 @@ def init_db():
                 discussion_group_id INTEGER,
                 task TEXT NOT NULL,
                 message_id INTEGER NOT NULL,
+                daily_message_id INTEGER NOT NULL,
                 status TEXT DEFAULT 'pending',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (channel_id) REFERENCES channels (channel_id)
@@ -284,7 +285,7 @@ async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with get_db() as db:
             db.execute(
                 """
-                INSERT INTO tasks (user_id, channel_id, discussion_group_id, task, message_id, created_at)
+                INSERT INTO tasks (user_id, channel_id, discussion_group_id, task, message_id, daily_message_id, created_at)
                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
                 (
@@ -293,6 +294,7 @@ async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     task_message.chat.id,
                     task,
                     task_message.message_id,
+                    daily_message["id"],
                 ),
             )
             db.commit()
@@ -374,20 +376,24 @@ async def send_daily_recap(context: ContextTypes.DEFAULT_TYPE):
             with get_db() as db:
                 tasks = db.execute(
                     """
-                    WITH latest_message AS (
+                    WITH latest_daily_message_date AS (
                         SELECT date 
                         FROM daily_messages 
                         WHERE channel_id = ? 
                         ORDER BY created_at DESC 
                         LIMIT 1
-                    )
-                    SELECT t.*, dm.date
+                    ),
+                   	current_daily_messages AS (
+                      select dm.* FROM daily_messages dm
+                      JOIN latest_daily_message_date ldmd ON dm.date = ldmd.date 
+                      WHERE dm.channel_id = ?
+                      ),
+                    SELECT t.*, cdm.date
                     FROM tasks t
-                    JOIN daily_messages dm ON t.channel_id = dm.channel_id and t.user_id = dm.user_id
-                    JOIN latest_message lm ON dm.date = lm.date
+                    JOIN current_daily_messages cdm ON t.daily_message_id = cdm.id
                     WHERE t.channel_id = ?
                 """,
-                    (channel["channel_id"], channel["channel_id"]),
+                    (channel["channel_id"], channel["channel_id"], channel["channel_id"]),
                 ).fetchall()
 
             if len(tasks) == 0:
@@ -444,6 +450,7 @@ async def send_daily_recap(context: ContextTypes.DEFAULT_TYPE):
             logger.exception(
                 f"Error sending recap for channel {channel['channel_id']}: {e}"
             )
+            await context.bot.send_message(channel["channel_id"], "❌ Error sending recap")
 
 
 async def setup_commands(context: ContextTypes.DEFAULT_TYPE):
