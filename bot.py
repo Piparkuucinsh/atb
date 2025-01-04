@@ -9,6 +9,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ContextTypes,
+    # CallbackQueryHandler,
 )
 from telegram.error import TelegramError
 import sqlite3
@@ -72,6 +73,15 @@ def init_db():
             );
         """)
         db.commit()
+
+        # CREATE TABLE IF NOT EXISTS recurring_tasks (
+        #         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        #         user_id INTEGER NOT NULL,
+        #         channel_id INTEGER NOT NULL,
+        #         task TEXT NOT NULL,
+        #         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        #         FOREIGN KEY (channel_id) REFERENCES channels (channel_id)
+        #     );
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -286,7 +296,7 @@ async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.execute(
                 """
                 INSERT INTO tasks (user_id, channel_id, discussion_group_id, task, message_id, daily_message_id, created_at)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             """,
                 (
                     update.message.from_user.id,
@@ -387,7 +397,7 @@ async def send_daily_recap(context: ContextTypes.DEFAULT_TYPE):
                       select dm.* FROM daily_messages dm
                       JOIN latest_daily_message_date ldmd ON dm.date = ldmd.date 
                       WHERE dm.channel_id = ?
-                      ),
+                      )
                     SELECT t.*, cdm.date
                     FROM tasks t
                     JOIN current_daily_messages cdm ON t.daily_message_id = cdm.id
@@ -458,6 +468,8 @@ async def setup_commands(context: ContextTypes.DEFAULT_TYPE):
     commands = [
         ("start", "Start the accountability bot in this channel"),
         ("task", "Add a task to your daily message"),
+        # ("setrecurringtask", "Set a task that repeats daily"),
+        # ("removerecurringtask", "Remove a recurring task"),
     ]
 
     # Set commands for channels
@@ -466,6 +478,102 @@ async def setup_commands(context: ContextTypes.DEFAULT_TYPE):
         scope=telegram.BotCommandScopeAllChatAdministrators(),  # Makes commands visible to admins in all chats
     )
     logger.info("Bot commands configured")
+
+
+# async def setrecurringtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     """Set a recurring task that will be added automatically each day"""
+#     if not update.message or not context.args or not update.message.from_user:
+#         return
+    
+#     task = " ".join(context.args)
+    
+#     with get_db() as db:
+#         # Check if user has a daily message in this group
+#         daily_message = db.execute(
+#             """
+#             SELECT channel_id FROM daily_messages 
+#             WHERE discussion_group_id = ? AND user_id = ?
+#             ORDER BY created_at DESC
+#             LIMIT 1
+#             """,
+#             (update.message.chat.id, update.message.from_user.id),
+#         ).fetchone()
+        
+#         if not daily_message:
+#             await update.message.reply_text("❌ No daily message found. Please wait for the next daily message.")
+#             return
+        
+#         # Add recurring task
+#         db.execute(
+#             """
+#             INSERT INTO recurring_tasks (user_id, channel_id, task)
+#             VALUES (?, ?, ?)
+#             """,
+#             (update.message.from_user.id, daily_message["channel_id"], task)
+#         )
+#         db.commit()
+    
+#     await update.message.reply_text(f"✅ Recurring task added: {task}")
+#     await update.message.delete()
+
+
+# async def removerecurringtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     """Remove a recurring task"""
+#     if not update.message or not update.message.from_user:
+#         return
+    
+#     with get_db() as db:
+#         # Get user's recurring tasks
+#         tasks = db.execute(
+#             """
+#             SELECT id, task FROM recurring_tasks 
+#             WHERE user_id = ? AND channel_id IN (
+#                 SELECT channel_id FROM daily_messages 
+#                 WHERE discussion_group_id = ?
+#             )
+#             """,
+#             (update.message.from_user.id, update.message.chat.id)
+#         ).fetchall()
+        
+#         if not tasks:
+#             await update.message.reply_text("❌ You have no recurring tasks.")
+#             return
+        
+#         # Create keyboard with tasks
+#         keyboard = []
+#         for task in tasks:
+#             keyboard.append([InlineKeyboardButton(
+#                 text=task["task"],
+#                 callback_data=f"remove_task_{task['id']}"
+#             )])
+        
+#         reply_markup = InlineKeyboardMarkup(keyboard)
+#         await update.message.reply_text(
+#             "Select a task to remove:",
+#             reply_markup=reply_markup
+#         )
+
+
+# async def handle_task_removal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+#     """Handle callback for task removal"""
+#     query = update.callback_query
+#     if not query or (query.data and not query.data.startswith("remove_task_")):
+#         return
+    
+#     if not query.data:
+#         return
+    
+#     task_id = int(query.data.split("_")[-1])
+    
+#     with get_db() as db:
+#         db.execute("DELETE FROM recurring_tasks WHERE id = ?", (task_id,))
+#         db.commit()
+    
+#     await query.answer("Task removed!")
+    
+#     if isinstance(query.message, telegram.Message):
+#         await query.message.edit_text("✅ Task removed successfully!")
+
 
 
 @logger.catch
@@ -513,6 +621,10 @@ def main():
 
     # Schedule daily recap at 11:30 PM in channel timezone
     job_queue.run_daily(send_daily_recap, time(5, 55, tzinfo=TIMEZONE))
+
+    # application.add_handler(CommandHandler("setrecurringtask", setrecurringtask, filters.ChatType.GROUPS))
+    # application.add_handler(CommandHandler("removerecurringtask", removerecurringtask, filters.ChatType.GROUPS))
+    # application.add_handler(CallbackQueryHandler(handle_task_removal, pattern="^remove_task_"))
 
     logger.info("Bot started successfully")
     application.run_polling()
