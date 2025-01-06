@@ -9,7 +9,7 @@ from telegram.ext import (
     MessageHandler,
     filters,
     ContextTypes,
-    # CallbackQueryHandler,
+    CallbackQueryHandler,
 )
 from telegram.error import TelegramError
 import sqlite3
@@ -71,17 +71,17 @@ def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (channel_id) REFERENCES channels (channel_id)
             );
+                         
+                        CREATE TABLE IF NOT EXISTS recurring_tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            task TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (channel_id) REFERENCES channels (channel_id)
+            );
         """)
         db.commit()
-
-        # CREATE TABLE IF NOT EXISTS recurring_tasks (
-        #         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        #         user_id INTEGER NOT NULL,
-        #         channel_id INTEGER NOT NULL,
-        #         task TEXT NOT NULL,
-        #         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        #         FOREIGN KEY (channel_id) REFERENCES channels (channel_id)
-        #     );
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -148,7 +148,6 @@ async def start_daily_routine(context: ContextTypes.DEFAULT_TYPE):
                 chat_members = await context.bot.get_chat_administrators(
                     channel["channel_id"]
                 )
-                    
 
                 for member in chat_members:
                     if member.user.is_bot:
@@ -248,7 +247,7 @@ async def task(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not update.message or not context.args or not update.message.from_user:
         return
-    
+
     task = " ".join(context.args)
 
     # Join all arguments into a single task text
@@ -403,7 +402,11 @@ async def send_daily_recap(context: ContextTypes.DEFAULT_TYPE):
                     JOIN current_daily_messages cdm ON t.daily_message_id = cdm.id
                     WHERE t.channel_id = ?
                 """,
-                    (channel["channel_id"], channel["channel_id"], channel["channel_id"]),
+                    (
+                        channel["channel_id"],
+                        channel["channel_id"],
+                        channel["channel_id"],
+                    ),
                 ).fetchall()
 
             if len(tasks) == 0:
@@ -460,7 +463,9 @@ async def send_daily_recap(context: ContextTypes.DEFAULT_TYPE):
             logger.exception(
                 f"Error sending recap for channel {channel['channel_id']}: {e}"
             )
-            await context.bot.send_message(channel["channel_id"], "❌ Error sending recap")
+            await context.bot.send_message(
+                channel["channel_id"], "❌ Error sending recap"
+            )
 
 
 async def setup_commands(context: ContextTypes.DEFAULT_TYPE):
@@ -468,8 +473,8 @@ async def setup_commands(context: ContextTypes.DEFAULT_TYPE):
     commands = [
         ("start", "Start the accountability bot in this channel"),
         ("task", "Add a task to your daily message"),
-        # ("setrecurringtask", "Set a task that repeats daily"),
-        # ("removerecurringtask", "Remove a recurring task"),
+        ("setrecurringtask", "Set a task that repeats daily"),
+        ("removerecurringtask", "Remove a recurring task"),
     ]
 
     # Set commands for channels
@@ -480,100 +485,185 @@ async def setup_commands(context: ContextTypes.DEFAULT_TYPE):
     logger.info("Bot commands configured")
 
 
-# async def setrecurringtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     """Set a recurring task that will be added automatically each day"""
-#     if not update.message or not context.args or not update.message.from_user:
-#         return
-    
-#     task = " ".join(context.args)
-    
-#     with get_db() as db:
-#         # Check if user has a daily message in this group
-#         daily_message = db.execute(
-#             """
-#             SELECT channel_id FROM daily_messages 
-#             WHERE discussion_group_id = ? AND user_id = ?
-#             ORDER BY created_at DESC
-#             LIMIT 1
-#             """,
-#             (update.message.chat.id, update.message.from_user.id),
-#         ).fetchone()
-        
-#         if not daily_message:
-#             await update.message.reply_text("❌ No daily message found. Please wait for the next daily message.")
-#             return
-        
-#         # Add recurring task
-#         db.execute(
-#             """
-#             INSERT INTO recurring_tasks (user_id, channel_id, task)
-#             VALUES (?, ?, ?)
-#             """,
-#             (update.message.from_user.id, daily_message["channel_id"], task)
-#         )
-#         db.commit()
-    
-#     await update.message.reply_text(f"✅ Recurring task added: {task}")
-#     await update.message.delete()
+async def setrecurringtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set a recurring task that will be added automatically each day"""
+    if not update.message or not context.args or not update.message.from_user:
+        return
+
+    task = " ".join(context.args)
+
+    with get_db() as db:
+        # Check if user has a daily message in this group
+        daily_message = db.execute(
+            """
+            SELECT channel_id FROM daily_messages
+            WHERE discussion_group_id = ? AND user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (update.message.chat.id, update.message.from_user.id),
+        ).fetchone()
+
+        if not daily_message:
+            await update.message.reply_text(
+                "❌ No daily message found. Please wait for the next daily message."
+            )
+            return
+
+        # Add recurring task
+        db.execute(
+            """
+            INSERT INTO recurring_tasks (user_id, channel_id, task)
+            VALUES (?, ?, ?)
+            """,
+            (update.message.from_user.id, daily_message["channel_id"], task),
+        )
+        db.commit()
+
+    await update.message.reply_text(f"✅ Recurring task added: {task}")
 
 
-# async def removerecurringtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     """Remove a recurring task"""
-#     if not update.message or not update.message.from_user:
-#         return
-    
-#     with get_db() as db:
-#         # Get user's recurring tasks
-#         tasks = db.execute(
-#             """
-#             SELECT id, task FROM recurring_tasks 
-#             WHERE user_id = ? AND channel_id IN (
-#                 SELECT channel_id FROM daily_messages 
-#                 WHERE discussion_group_id = ?
-#             )
-#             """,
-#             (update.message.from_user.id, update.message.chat.id)
-#         ).fetchall()
-        
-#         if not tasks:
-#             await update.message.reply_text("❌ You have no recurring tasks.")
-#             return
-        
-#         # Create keyboard with tasks
-#         keyboard = []
-#         for task in tasks:
-#             keyboard.append([InlineKeyboardButton(
-#                 text=task["task"],
-#                 callback_data=f"remove_task_{task['id']}"
-#             )])
-        
-#         reply_markup = InlineKeyboardMarkup(keyboard)
-#         await update.message.reply_text(
-#             "Select a task to remove:",
-#             reply_markup=reply_markup
-#         )
+async def removerecurringtask(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a recurring task"""
+    if not update.message or not update.message.from_user:
+        return
+
+    with get_db() as db:
+        # Get user's recurring tasks
+        tasks = db.execute(
+            """
+            SELECT id, task FROM recurring_tasks
+            WHERE user_id = ? AND channel_id IN (
+                SELECT channel_id FROM daily_messages
+                WHERE discussion_group_id = ?
+            )
+            """,
+            (update.message.from_user.id, update.message.chat.id),
+        ).fetchall()
+
+        if not tasks:
+            await update.message.reply_text("❌ You have no recurring tasks.")
+            return
+
+        # Create keyboard with tasks
+        keyboard = []
+        for task in tasks:
+            keyboard.append(
+                [
+                    InlineKeyboardButton(
+                        text=task["task"], callback_data=f"remove_task_{task['id']}"
+                    )
+                ]
+            )
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "Select a task to remove:", reply_markup=reply_markup
+        )
 
 
-# async def handle_task_removal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-#     """Handle callback for task removal"""
-#     query = update.callback_query
-#     if not query or (query.data and not query.data.startswith("remove_task_")):
-#         return
-    
-#     if not query.data:
-#         return
-    
-#     task_id = int(query.data.split("_")[-1])
-    
-#     with get_db() as db:
-#         db.execute("DELETE FROM recurring_tasks WHERE id = ?", (task_id,))
-#         db.commit()
-    
-#     await query.answer("Task removed!")
-    
-#     if isinstance(query.message, telegram.Message):
-#         await query.message.edit_text("✅ Task removed successfully!")
+async def handle_task_removal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle callback for task removal"""
+    query = update.callback_query
+    if not query or (query.data and not query.data.startswith("remove_task_")):
+        return
 
+    if not query.data:
+        return
+
+    task_id = int(query.data.split("_")[-1])
+
+    with get_db() as db:
+        db.execute("DELETE FROM recurring_tasks WHERE id = ?", (task_id,))
+        db.commit()
+
+    await query.answer("Task removed!")
+
+    if isinstance(query.message, telegram.Message):
+        await query.message.edit_text("✅ Task removed successfully!")
+
+
+async def post_recurring_tasks(context: ContextTypes.DEFAULT_TYPE):
+    """Post recurring tasks to the channel"""
+    logger.info("Posting recurring tasks")
+
+    with get_db() as db:
+        channels = db.execute("SELECT * FROM channels").fetchall()
+
+    
+
+    for channel in channels:
+        chat_members = await context.bot.get_chat_administrators(
+                    channel["channel_id"]
+                )
+        
+        with get_db() as db:
+            daily_messages = db.execute(
+                """
+                WITH latest_daily_message_date AS (
+                    SELECT date 
+                    FROM daily_messages 
+                    WHERE channel_id = ? 
+                    ORDER BY created_at DESC 
+                    LIMIT 1
+                )
+                    SELECT dm.* FROM daily_messages dm
+                    JOIN latest_daily_message_date ldmd ON dm.date = ldmd.date 
+                    WHERE dm.channel_id = ?
+
+            """,
+                (
+                    channel["channel_id"],
+                    channel["channel_id"],
+                ),
+            ).fetchall()
+
+        for daily_message in daily_messages:
+            with get_db() as db:
+                recurring_tasks = db.execute(
+                    "SELECT task FROM recurring_tasks WHERE channel_id = ? AND user_id = ? ",
+                    (channel["channel_id"], daily_message["user_id"]),
+                ).fetchall()
+
+            # get chat member from chat members with user_id
+            chat_member = next(
+                (member for member in chat_members if member.user.id == daily_message["user_id"]),
+                None
+            )
+
+            for task in recurring_tasks:
+
+                if not chat_member:
+                    task_text = task["task"]
+                else:
+                    task_text = f"@{chat_member.user.username}: " + task["task"]
+
+                # add task as reply in discussion to daily message
+                task_message = await context.bot.send_message(
+                    daily_message["discussion_group_id"],
+                    task_text,
+                    reply_to_message_id=daily_message["discussion_message_id"],
+                )
+
+                try:
+                    with get_db() as db:
+                        db.execute(
+                            """
+                            INSERT INTO tasks (user_id, channel_id, discussion_group_id, task, message_id, daily_message_id, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                            (
+                                daily_message["user_id"],
+                                daily_message["channel_id"],
+                                daily_message["discussion_group_id"],
+                                task["task"],
+                                task_message.message_id,
+                                daily_message["id"],
+                            ),
+                        )
+                        db.commit()
+                except Exception as e:
+                    logger.exception(f"Error adding task: {e}")
 
 
 @logger.catch
@@ -599,6 +689,18 @@ def main():
         MessageHandler(filters.ALL & ~filters.COMMAND, handle_message)
     )
 
+    application.add_handler(
+        CommandHandler("setrecurringtask", setrecurringtask, filters.ChatType.GROUPS)
+    )
+    application.add_handler(
+        CommandHandler(
+            "removerecurringtask", removerecurringtask, filters.ChatType.GROUPS
+        )
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_task_removal, pattern="^remove_task_")
+    )
+
     if not application.job_queue:
         logger.error("Job queue is not initialized")
         return
@@ -618,13 +720,12 @@ def main():
 
     # job_queue.run_once(start_daily_routine, 1)
     # job_queue.run_once(send_daily_recap, 1)
+    # job_queue.run_once(post_recurring_tasks, 1)
 
     # Schedule daily recap at 11:30 PM in channel timezone
     job_queue.run_daily(send_daily_recap, time(5, 55, tzinfo=TIMEZONE))
 
-    # application.add_handler(CommandHandler("setrecurringtask", setrecurringtask, filters.ChatType.GROUPS))
-    # application.add_handler(CommandHandler("removerecurringtask", removerecurringtask, filters.ChatType.GROUPS))
-    # application.add_handler(CallbackQueryHandler(handle_task_removal, pattern="^remove_task_"))
+    job_queue.run_daily(post_recurring_tasks, time(6, 5, tzinfo=TIMEZONE))
 
     logger.info("Bot started successfully")
     application.run_polling()
